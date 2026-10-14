@@ -1,0 +1,25 @@
+let plan=[],planPortion=4,planGluten=false,planChecked=new Set();
+function recipeFor(d){return sourceRecipe(d.id,planGluten);}
+function planAmount(x){return x.n===0?'Etter behov':(x.n*planPortion).toLocaleString('nb-NO',{maximumFractionDigits:2})+' '+x.unit;}
+function totalIngredients(list){const totals=new Map();for(const r of list)for(const x of r.ingredients){const key=x.name+'|'+x.unit;const old=totals.get(key);if(old)old.n+=x.n;else totals.set(key,{...x});}return [...totals.values()].sort((a,b)=>a.name.localeCompare(b.name,'nb'));}
+function planSettings(){const n=Number($('people').value);if(!Number.isInteger(n)||n<1||n>30){$('plan-message').textContent='Velg mellom 1 og 30 personer i feltet over.';return false;}planPortion=n;planGluten=$('gf').checked;return true;}
+function drawPlan(current,categories=[0,1,2].map(i=>$('plan-category-'+i).value)){
+ const oldIds=new Set(current.map(d=>d.id)),used=new Set(current.filter(d=>d.keep).map(d=>d.id));
+ const result=current.length?current.map(d=>d.keep?{...d}:null):[null,null,null];
+ for(let i=0;i<3;i++){
+  if(result[i])continue;
+  const allowed=sourcedRecipes.filter(r=>(categories[i]==='any'||r.cat===categories[i])&&!used.has(r.id));
+  let pool=allowed.filter(r=>!oldIds.has(r.id));
+  if(!pool.length)pool=allowed.filter(r=>r.id!==current[i]?.id);
+  const r=pool[Math.floor(Math.random()*pool.length)];if(!r)throw new Error('Ingen tilgjengelige retter');
+  result[i]={id:r.id,cat:r.cat,keep:false};used.add(r.id);
+ }
+ return result;
+}
+function renderPlan(){if(!plan.length)return;const list=plan.map(recipeFor);$('plan-cards').innerHTML=list.map((r,i)=>`<article class="plan-card ${plan[i].keep?'kept':''}"><p class="hint">Middag ${i+1} · ${plan[i].cat==='meat'?'Kjøtt':plan[i].cat==='fish'?'Fisk':'Vegetar'}</p><h3>${escapeHtml(r.title)}</h3><div class="meta"><span class="pill">${r.time}</span><span class="pill">${planPortion} porsjoner</span>${planGluten?'<span class="pill">Glutenfri tilpasning</span>':''}</div><label class="keep"><input type="checkbox" data-keep="${i}" ${plan[i].keep?'checked':''}>Behold denne retten</label><a class="source-link" href="${escapeHtml(r.url)}" target="_blank" rel="noopener">Åpne oppskriften hos ${escapeHtml(r.source)}</a>${planGluten?'<p class="hint">Handlelisten er tilpasset glutenfritt. Originaloppskriften kan inneholde gluten.</p>':''}<details><summary>Se ingredienser</summary><ul class="ingredients">${r.ingredients.map(x=>`<li><span>${escapeHtml(x.name)}</span><span>${planAmount(x)}</span></li>`).join('')}</ul><ol>${r.steps.map(x=>`<li>${x}</li>`).join('')}</ol>${r.notes.map(note=>`<p class="source-notes">${escapeHtml(note)}</p>`).join('')}</details></article>`).join('');document.querySelectorAll('[data-keep]').forEach(box=>box.onchange=()=>{plan[Number(box.dataset.keep)].keep=box.checked;box.closest('.plan-card').classList.toggle('kept',box.checked);updatePlanButton();});
+ const totals=totalIngredients(list);$('plan-shopping').innerHTML=totals.map((x,i)=>{const key=x.name+'|'+x.unit+'|'+planAmount(x);return `<label><input type="checkbox" data-total="${i}" ${planChecked.has(key)?'checked':''}><span>${escapeHtml(x.name)} · ${planAmount(x)}</span></label>`;}).join('');document.querySelectorAll('[data-total]').forEach(box=>box.onchange=()=>{const x=totals[Number(box.dataset.total)],key=x.name+'|'+x.unit+'|'+planAmount(x);if(box.checked)planChecked.add(key);else planChecked.delete(key);});
+ $('plan-shopping-panel').hidden=false;$('plan-caption').textContent=`For alle de tre middagene, hver til ${planPortion} ${planPortion===1?'person':'personer'}. Like ingredienser er summert. «Behold» låser retten ved neste trekning.`;$('plan-copy-status').textContent='';updatePlanButton();}
+function updatePlanButton(){plan.forEach((d,i)=>{$('plan-category-'+i).disabled=d.keep;if(d.keep)$('plan-category-'+i).value=d.cat;});const kept=plan.filter(d=>d.keep).length;$('shuffle').disabled=kept===3;$('shuffle').textContent=kept===3?'Alle tre er beholdt':kept?'Bytt ut resten':'Gi meg tre nye';$('plan-message').textContent=kept===3?'Fjern en avkrysning for å få nye forslag.':`${kept} av 3 retter beholdes ved neste trekning.`;}
+$('shuffle').onclick=()=>{if(!planSettings())return;plan=drawPlan(plan);renderPlan();};
+for(const id of ['people','gf'])$(id).addEventListener('change',()=>{if(plan.length&&planSettings())renderPlan();});
+$('plan-copy').onclick=async()=>{const list=plan.map(recipeFor),totals=totalIngredients(list);const text=`Tre middager · ${planPortion} personer per middag${planGluten?' · Glutenfritt':''}\n${list.map((r,i)=>`${i+1}. ${r.title} (${r.source})\n${r.url}`).join('\n')}\n\nSamlet handleliste\n`+totals.map(x=>`☐ ${x.name}: ${planAmount(x)}`).join('\n');try{await navigator.clipboard.writeText(text);$('plan-copy-status').textContent='Den samlede handlelisten er kopiert.';}catch{const field=document.createElement('textarea');field.value=text;field.rows=14;field.style.width='100%';$('plan-copy-status').replaceChildren(field);field.select();$('plan-copy-status').append(' Kopier teksten fra feltet.');}};
